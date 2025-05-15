@@ -301,8 +301,8 @@ function getFilesForArchitecture(architecture) {
   if (NEZHA_SERVER && NEZHA_KEY) {
     if (NEZHA_PORT) {
       const npmUrl = architecture === 'arm' 
-        ? "https://github.com/zhangbin0301/myfiles/releases/download/ARM"
-        : "https://github.com/zhangbin0301/myfiles/releases/download/AMD";
+        ? "https://github.com/zhangbin0301/myfiles/releases/download/ARM/agent"
+        : "https://github.com/zhangbin0301/myfiles/releases/download/AMD/agent";
         baseFiles.unshift({ 
           fileName: "npm", 
           fileUrl: npmUrl 
