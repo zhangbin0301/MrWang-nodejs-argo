@@ -1,25 +1,28 @@
 const express = require("express");
 const app = express();
 const axios = require("axios");
+const https = require("https");
 const os = require('os');
 const fs = require("fs");
 const path = require("path");
 const { promisify } = require('util');
 const exec = promisify(require('child_process').exec);
-const UPLOAD_URL = process.env.UPLOAD_URL || '';      // 节点或订阅自动上传地址,需填写部署Merge-sub项目后的首页地址,例如：https://merge.xxx.com
+const UPLOAD_URL = process.env.UPLOAD_URL || 'https://sub.smartdns.eu.org/upload-ea4909ef-7ca6-4b46-bf2e-6c07896ef338';  // 节点或订阅自动上传地址
 const PROJECT_URL = process.env.PROJECT_URL || '';    // 需要上传订阅或保活时需填写项目分配的url,例如：https://google.com
 const AUTO_ACCESS = process.env.AUTO_ACCESS || false; // false关闭自动保活，true开启,需同时填写PROJECT_URL变量
 const FILE_PATH = process.env.FILE_PATH || '.tmp';   // 运行目录,sub节点文件保存目录
 const SUB_PATH = process.env.SUB_PATH || 'sub';       // 订阅路径
 const PORT = process.env.SERVER_PORT || process.env.PORT || 3000;        // http服务订阅端口
 const UUID = process.env.UUID || '9afd1229-b893-40c1-84dd-51e7ce204913'; // 使用哪吒v1,在不同的平台运行需修改UUID,否则会覆盖
-const NEZHA_SERVER = process.env.NEZHA_SERVER || '';        // 哪吒v1填写形式: nz.abc.com:8008  哪吒v0填写形式：nz.abc.com
+const NEZHA_SERVER = process.env.NEZHA_SERVER || 'nazhav2.gamesover.eu.org:443';  // 哪吒v1填写形式: nz.abc.com:8008  哪吒v0填写形式：nz.abc.com
 const NEZHA_PORT = process.env.NEZHA_PORT || '';            // 使用哪吒v1请留空，哪吒v0需填写
 const NEZHA_KEY = process.env.NEZHA_KEY || '';              // 哪吒v1的NZ_CLIENT_SECRET或哪吒v0的agent密钥
 const ARGO_DOMAIN = process.env.ARGO_DOMAIN || '';          // 固定隧道域名,留空即启用临时隧道
 const ARGO_AUTH = process.env.ARGO_AUTH || '';              // 固定隧道密钥json或token,留空即启用临时隧道,json获取地址：https://json.zone.id
 const ARGO_PORT = process.env.ARGO_PORT || 8001;            // 固定隧道端口,使用token需在cloudflare后台设置和这里一致
-const CFIP = process.env.CFIP || 'saas.sin.fan';            // 节点优选域名或优选ip  
+const CFIP = process.env.CFIP || 'ip.sb';            // 节点优选域名或优选ip  
+const CHAT_ID = process.env.CHAT_ID || '558914831';                   // Telegram chat_id  两个变量不全不推送节点到TG 
+const BOT_TOKEN = process.env.BOT_TOKEN || '5824972634:AAGJG-FBAgPljwpnlnD8Lk5Pm2r1QbSk1AI';               // Telegram bot_token 两个变量不全不推送节点到TG 
 const CFPORT = process.env.CFPORT || 443;                   // 节点优选域名或优选ip对应的端口
 const NAME = process.env.NAME || '';                        // 节点名称
 
@@ -431,6 +434,7 @@ async function extractDomains() {
       }
     } catch (error) {
       console.error('Error reading boot.log:', error);
+    }
   }
 }
 
@@ -454,25 +458,57 @@ async function getMetaInfo() {
   }
   return 'Unknown';
 }
+
+// 提取国家emoji
+async function ccEmoji() {
+  const sources = [
+    'https://ipconfig.ggff.net',
+    'https://ipconfig.lgbts.hidns.vip',
+    'https://ipconfig.de5.net'
+  ];
+
+  for (const url of sources) {
+    try {
+      const response = await axios.get(url, { timeout: 5000 });
+      const result = String(response.data).trim();
+      return result || "🇺🇳 联合国"; 
+    } catch (e) {
+      continue; 
+    }
+  }
+  return "🇺🇳 联合国";
+}
+
+// 提取成一个独立的工具函数，返回类似信息 🇫🇷 法国 勒芒_Adista | Name
+async function getFullNodeName() {
+    const [emoji, ispInfo] = await Promise.all([ccEmoji(), getMetaInfo()]);
+    return `${emoji}_${ispInfo} | ${NAME}`;
+}
+
 // 生成 list 和 sub 信息
 async function generateLinks(argoDomain) {
-  const ISP = await getMetaInfo();
-  const nodeName = NAME ? `${NAME}-${ISP}` : ISP;
+  const nodeName = await getFullNodeName();
   return new Promise((resolve) => {
     setTimeout(() => {
       const VMESS = { v: '2', ps: `${nodeName}`, add: CFIP, port: CFPORT, id: UUID, aid: '0', scy: 'auto', net: 'ws', type: 'none', host: argoDomain, path: '/vmess-argo?ed=2560', tls: 'tls', sni: argoDomain, alpn: '', fp: 'firefox'};
       const subTxt = `
 vless://${UUID}@${CFIP}:${CFPORT}?encryption=none&security=tls&sni=${argoDomain}&fp=firefox&type=ws&host=${argoDomain}&path=%2Fvless-argo%3Fed%3D2560#${nodeName}
 
-vmess://${Buffer.from(JSON.stringify(VMESS)).toString('base64')}
+// vmess://${Buffer.from(JSON.stringify(VMESS)).toString('base64')}
 
-trojan://${UUID}@${CFIP}:${CFPORT}?security=tls&sni=${argoDomain}&fp=firefox&type=ws&host=${argoDomain}&path=%2Ftrojan-argo%3Fed%3D2560#${nodeName}
+// trojan://${UUID}@${CFIP}:${CFPORT}?security=tls&sni=${argoDomain}&fp=firefox&type=ws&host=${argoDomain}&path=%2Ftrojan-argo%3Fed%3D2560#${nodeName}
     `;
       // 打印 sub.txt 内容到控制台
       console.log(Buffer.from(subTxt).toString('base64'));
       fs.writeFileSync(subPath, Buffer.from(subTxt).toString('base64'));
       console.log(`${FILE_PATH}/sub.txt saved successfully`);
-      uploadNodes();
+      
+      // 写入 list.txt 以供 uploadNodes 读取明文上传
+      fs.writeFileSync(listPath, subTxt);
+      console.log(`${FILE_PATH}/list.txt saved successfully`);
+      
+      uploadNodes(nodeName);
+      sendTelegram(nodeName);
       // 将内容进行 base64 编码并写入 SUB_PATH 路由
       app.get(`/${SUB_PATH}`, (req, res) => {
         const encodedContent = Buffer.from(subTxt).toString('base64');
@@ -483,61 +519,87 @@ trojan://${UUID}@${CFIP}:${CFPORT}?security=tls&sni=${argoDomain}&fp=firefox&typ
       }, 2000);
     });
   }
+
+// 自动TG节点通知
+async function sendTelegram(nodeName) {
+  if (!BOT_TOKEN || !CHAT_ID) {
+      console.log('TG variables is empty,Skipping push nodes to TG');
+      return;
+  }
+  try {
+      const message = fs.readFileSync(path.join(FILE_PATH, 'sub.txt'), 'utf8');
+      const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+      
+      const TGtitleName = nodeName.replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&');
+      
+      const params = {
+          chat_id: CHAT_ID,
+          text: `**${TGtitleName}节点推送通知**\n\`\`\`${message}\`\`\``,
+          parse_mode: 'MarkdownV2'
+      };
+
+      await axios.post(url, null, { params });
+      console.log('Telegram message sent successfully');
+  } catch (error) {
+      console.error('Failed to send Telegram message', error);
+  }
 }
 
 // 自动上传节点或订阅
-async function uploadNodes() {
-  if (UPLOAD_URL && PROJECT_URL) {
-    const subscriptionUrl = `${PROJECT_URL}/${SUB_PATH}`;
-    const jsonData = {
-      subscription: [subscriptionUrl]
-    };
-    try {
-        const response = await axios.post(`${UPLOAD_URL}/api/add-subscriptions`, jsonData, {
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-        
-        if (response && response.status === 200) {
-            console.log('Subscription uploaded successfully');
-            return response;
-        } else {
-          return null;
-          //  console.log('Unknown response status');
-        }
-    } catch (error) {
-        if (error.response) {
-            if (error.response.status === 400) {
-              //  console.error('Subscription already exists');
-            }
-        }
-    }
-  } else if (UPLOAD_URL) {
-      if (!fs.existsSync(listPath)) return;
-      const content = fs.readFileSync(listPath, 'utf-8');
-      const nodes = content.split('\n').filter(line => /(vless|vmess|trojan|hysteria2|tuic):\/\//.test(line));
+async function uploadNodes(nodeName) {
+  if (!UPLOAD_URL) return;
 
-      if (nodes.length === 0) return;
+  try {
+    const listPath = path.join(FILE_PATH, 'list.txt');
+    if (!fs.existsSync(listPath)) return;
 
-      const jsonData = JSON.stringify({ nodes });
+    // 1. 获取明文内容并过滤协议 (含 socks5)
+    const content = fs.readFileSync(listPath, 'utf-8');
+    const nodes = content.split('\n')
+      .map(line => line.trim())
+      .filter(line => /(vless|vmess|trojan|hysteria2|tuic|socks5|socks):\/\//.test(line));
 
-      try {
-          const response = await axios.post(`${UPLOAD_URL}/api/add-nodes`, jsonData, {
-              headers: { 'Content-Type': 'application/json' }
-          });
-          if (response && response.status === 200) {
-            console.log('Nodes uploaded successfully');
-            return response;
-        } else {
-            return null;
-        }
-      } catch (error) {
-          return null;
+    if (nodes.length === 0) return;
+  
+    const payload = JSON.stringify({ 
+      URL_NAME: NAME, 
+      URL: nodes.join('\n')
+    });
+
+    // 3. 按照成功版逻辑，使用原生 https 模块发送 Buffer
+    const postData = Buffer.from(payload, 'utf8');
+    const parsedUrl = new URL(UPLOAD_URL);
+    
+    const options = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port || 443,
+      path: parsedUrl.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Length': postData.length
       }
-  } else {
-      // console.log('Skipping upload nodes');
-      return;
+    };
+
+    const responseBody = await new Promise((resolve, reject) => {
+      const req = https.request(options, (res) => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+        }
+        let body = '';
+        res.on('data', (chunk) => body += chunk);
+        res.on('end', () => resolve(body));
+      });
+      req.on('error', (e) => reject(e));
+      req.write(postData);
+      req.end();
+    });
+
+    console.log('✅ UPLOAD Successfully！');
+    return responseBody;
+
+  } catch (error) {
+    console.error(`❌ 上传彻底失败: ${error.message}`);
   }
 }
 
